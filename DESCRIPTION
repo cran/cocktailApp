@@ -4,8 +4,8 @@ Authors@R: c(person(c("Steven", "E."), "Pav",
     role=c("aut","cre"),
     email="shabbychef@gmail.com",
     comment = c(ORCID = "0000-0002-4197-6195")))
-Version: 0.2.0
-Date: 2018-08-19
+Version: 0.2.1
+Date: 2019-07-01
 License: LGPL-3
 Title: 'shiny' App to Discover Cocktails
 BugReports: https://github.com/shabbychef/cocktailApp/issues
@@ -13,16 +13,16 @@ Description: A 'shiny' app to discover cocktails. The
     app allows one to search for cocktails by ingredient,
     filter on rating, and number of ingredients. The
     package also contains data with the ingredients of
-    nearly 16 thousand cocktails scraped from the web.
+    nearly 26 thousand cocktails scraped from the web.
 Depends: R (>= 3.0.2), shiny
-Imports: shinythemes, dplyr, tidyr, tibble, ggplot2, magrittr, Ternary,
+Imports: shinythemes, dplyr, tidyr, tibble, ggplot2, magrittr, ggtern,
         forcats, DT
 Suggests: testthat
 URL: https://github.com/shabbychef/cocktailApp
 Collate: 'cocktailApp.r'
-RoxygenNote: 6.0.1
+RoxygenNote: 6.1.1
 NeedsCompilation: no
-Packaged: 2018-08-19 16:11:21 UTC; root
+Packaged: 2019-07-02 05:43:18 UTC; root
 Author: Steven E. Pav [aut, cre] (<https://orcid.org/0000-0002-4197-6195>)
 Repository: CRAN
-Date/Publication: 2018-08-19 16:40:02 UTC
+Date/Publication: 2019-07-02 08:30:10 UTC
