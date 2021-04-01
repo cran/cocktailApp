@@ -69,6 +69,13 @@ NULL
 #' \newcommand{\CRANpkg}{\href{https://cran.r-project.org/package=#1}{\pkg{#1}}}
 #' \newcommand{\cocktailApp}{\CRANpkg{cocktailApp}}
 #'
+#' @section \cocktailApp{} Version 0.2.2 (2021-04-01) :
+#' \itemize{
+#' \item merge many short ingredients.
+#' \item fix some units in webtender data.
+#' \item search by ingredient regex.
+#' }
+#'
 #' @section \cocktailApp{} Version 0.2.1 (2019-07-01) :
 #' \itemize{
 #' \item CRAN fix as tests were hanging.
@@ -124,14 +131,15 @@ NULL
 #'   this is the proportion of the given cocktail that consists of the given ingredient. For a given
 #'   cocktail, the proportions should sum to one.}
 #' }
-#' @source Difford's Guide, \url{http://www.diffordsguide.com/},
-#' Webtender, \url{http://www.webtender.com},
-#' Kindred Cocktails, \url{http://kindredcocktails.com},
+#' @source Difford's Guide, \url{https://www.diffordsguide.com/},
+#' Webtender, \url{https://www.webtender.com},
+#' Kindred Cocktails, \url{https://kindredcocktails.com},
 #' Drinks Mixer, \url{http://www.drinksmixer.com}.
 #' @note 
 #' The data were scraped from several websites, which falls in a legal gray area.
 #' While, in general, raw factual data can not be copyright, there is a difference between the law and a lawsuit. 
 #' The package author in no way claims any copyright on this data.
+#' @usage data(cocktails)
 #' @examples
 #' data(cocktails)
 #' str(cocktails)
@@ -156,6 +164,10 @@ globalVariables(c('cocktails','votes','rating','cocktail','proportion','url','sh
 									'tstat','page_src','tst',
 									'has_or_must','has_and_must','has_not_must',
 									'matches_name','ingr_class','description',
+									'isfl',
+									'match_re_ing',
+									'has_ing','bad_ing',
+									'ck_ok',
 									'pct_amt',
 									'tot_amt','has_both','Other',
 									'ingredient','coingredient','cova','wts'))
@@ -220,6 +232,7 @@ my_ui <- function(page_title='Drink Schnauzer') {  # nocov start
 				selectInput("must_not_have_ing","Must Not Have:",choices=ingr,selected=c(),multiple=TRUE),
 				selectInput("from_sources","Sources:",choices=all_source,selected=all_source[grepl('diffords|kindred',all_source)],multiple=TRUE),
 				textInput("name_regex","Name Regex:",value='',placeholder='^sazerac'),
+				textInput("ing_regex","Ingredient Regex:",value='',placeholder='^[Cc]hartreus'),
 				helpText('Select for random cocktails:'),
 				checkboxInput("hobsons","Hobson's Choice!",value=FALSE),
 				hr(),
@@ -288,13 +301,15 @@ applylink <- function(title,url) {
 # creates information about cocktails from the recipe data frame
 .distill_info <- function(recipe_df) {
 	cocktail_df <- recipe_df %>%
+		dplyr::mutate(isfl=(unit=='fl oz')) %>%
 		dplyr::group_by(cocktail_id) %>%
-		dplyr::summarize(cocktail=dplyr::first(cocktail),
-										 rating=dplyr::first(rating),
-										 votes=as.numeric(dplyr::first(votes)),
-										 url=dplyr::first(url),
-										 tot_ingr=sum(grepl('fl oz',unit))) %>%
+			dplyr::summarize(cocktail=dplyr::first(cocktail),
+											 rating=dplyr::first(rating),
+											 votes=dplyr::first(votes),
+											 url=dplyr::first(url),
+											 tot_ingr=sum(isfl)) %>%
 		dplyr::ungroup() %>%
+		mutate(votes=as.numeric(votes)) %>%
 		dplyr::mutate(page_src=gsub('^http://(www.)?(.+).com/.+$','\\2',url))
 }
 
@@ -313,7 +328,8 @@ applylink <- function(title,url) {
 	list(recipe=recipe_df %>% dplyr::select(-cocktail,-rating,-votes,-url),cocktail=cocktail_df)
 }
 
-.filter_ingredients <- function(both,name_regex,must_have_ing,must_not_have_ing,logical_sense=c('AND','OR'),extra_ids=NULL) {
+.filter_ingredients <- function(both,name_regex,must_have_ing,must_not_have_ing,
+																ing_regex='',logical_sense=c('AND','OR'),extra_ids=NULL) {
 	logical_sense <- match.arg(logical_sense)
 
 	if (nzchar(name_regex)) {
@@ -334,16 +350,47 @@ applylink <- function(title,url) {
 		match_name <- match_name %>% rbind(more_match)
 	}
 
-	new_recipe <- both$recipe %>%
-		dplyr::group_by(cocktail_id) %>%
-			dplyr::mutate(has_or_must=any(short_ingredient %in% must_have_ing),
-										has_and_must=all(must_have_ing %in% short_ingredient),
-										has_not_must=any(short_ingredient %in% must_not_have_ing)) %>%
-		dplyr::ungroup() %>%
-		dplyr::left_join(match_name,by='cocktail_id') %>%
-		dplyr::mutate(matches_name=coalesce(matches_name,FALSE)) %>%
-		dplyr::filter( (!has_not_must & ((logical_sense=='AND') | has_or_must) & ((logical_sense=='OR') | has_and_must)) | matches_name) %>%
-		dplyr::select(-has_and_must,-has_not_must,-has_or_must,-matches_name)
+	# for the moment, these operations are terribly slow in dplyr 0.8.2
+	# cf https://github.com/tidyverse/dplyr/issues/4458
+	# when we upgrade to 0.8.3, it is worth timing the alternatives
+	# on this.
+	ok_by_ing <- both$recipe %>%
+		dplyr::mutate(bad_ing=(short_ingredient %in% must_not_have_ing)) 
+
+	# search regex by ingredient
+	if (nzchar(ing_regex)) {
+		ok_by_ing <- ok_by_ing %>%
+			dplyr::mutate(match_re_ing=grepl(pattern=ing_regex,x=short_ingredient,ignore.case=TRUE,perl=TRUE,fixed=FALSE)) 
+	} else {
+		ok_by_ing <- ok_by_ing %>%
+			dplyr::mutate(match_re_ing=FALSE)
+	}
+	if ((length(must_have_ing) > 0) || nzchar(ing_regex)) {
+		if ((logical_sense=='AND') && (length(must_have_ing) > 1)) {   # n.b. AND with one term is the same as OR.
+			ok_by_ing <- ok_by_ing %>%
+				dplyr::group_by(cocktail_id) %>%
+					dplyr::summarize(ck_ok = (all(must_have_ing %in% short_ingredient) | any(match_re_ing)) & !any(bad_ing)) %>%
+				dplyr::ungroup()
+		} else {
+			ok_by_ing <- ok_by_ing %>%
+				dplyr::mutate(has_ing=(short_ingredient %in% must_have_ing)) %>%
+				dplyr::group_by(cocktail_id) %>%
+					dplyr::summarize(ck_ok=any(has_ing | match_re_ing) & !any(bad_ing)) %>%
+				dplyr::ungroup() 
+		}
+	} else {
+		# empty
+		ok_by_ing <- tibble::tribble(~cocktail_id,~ck_ok)
+	}
+
+  new_recipe <- match_name %>%
+		dplyr::left_join(both$recipe,by='cocktail_id') %>%
+		dplyr::select(-matches_name) %>%
+		rbind(ok_by_ing %>%
+					dplyr::filter(ck_ok) %>%
+					dplyr::select(-ck_ok) %>%
+					dplyr::left_join(both$recipe,by='cocktail_id')) 
+
 	new_cocktail <- both$cocktail %>%
 		dplyr::right_join(new_recipe %>% dplyr::distinct(cocktail_id),by='cocktail_id')
 
@@ -389,7 +436,7 @@ applylink <- function(title,url) {
 
 .add_description <- function(both) {
 	descdat <- both$recipe %>%
-		dplyr::filter(grepl('fl oz',unit)) %>%
+		dplyr::filter(unit=='fl oz') %>%
 		dplyr::arrange(dplyr::desc(amt)) %>%
 		dplyr::group_by(cocktail_id) %>%
 			dplyr::summarize(description=paste0(paste0(short_ingredient,collapse=', '),'.')) %>%
@@ -404,7 +451,7 @@ applylink <- function(title,url) {
 	both$recipe %>%
 		dplyr::left_join(both$cocktail,by='cocktail_id') %>%
 		dplyr::select(cocktail,rating,amt,unit,ingredient,everything()) %>%
-		dplyr::arrange(dplyr::desc(rating),cocktail,dplyr::desc(as.numeric(grepl('fl oz',unit))),dplyr::desc(amt))
+		dplyr::arrange(dplyr::desc(rating),cocktail,dplyr::desc(as.numeric(unit=='fl oz')),dplyr::desc(amt))
 }
 
 .drinks_table <- function(both) {
@@ -477,7 +524,7 @@ applylink <- function(title,url) {
 .make_bar_plot <- function(both_df) {
 	#facet_grid(.~rating) + 
 	ph <- both_df %>%
-		dplyr::filter(grepl('fl oz',unit)) %>%
+		dplyr::filter(unit=='fl oz') %>%
 		dplyr::arrange(dplyr::desc(rating)) %>%
 		mutate(pct_amt=100*proportion) %>%
 		ggplot(aes(ingredient,pct_amt,fill=cocktail)) + 
@@ -574,6 +621,7 @@ my_server <- function(input, output, session) { # nocov start
 		.filter_ingredients(both=get_both(),name_regex=input$name_regex,extra_ids=hobsons_choice$ids,
 												must_have_ing=input$must_have_ing,
 												must_not_have_ing=input$must_not_have_ing,
+												ing_regex=input$ing_regex,
 												logical_sense=input$logical_sense)
 	})
 	filter_num_ingr <- reactive({
