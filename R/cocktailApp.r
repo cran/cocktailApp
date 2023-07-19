@@ -69,6 +69,13 @@ NULL
 #' \newcommand{\CRANpkg}{\href{https://cran.r-project.org/package=#1}{\pkg{#1}}}
 #' \newcommand{\cocktailApp}{\CRANpkg{cocktailApp}}
 #'
+#' @section \cocktailApp{} Version 0.2.3 (2023-07-18) :
+#' \itemize{
+#' \item fix bug where you could not search for Gin or Vodka.
+#' \item package had been archived because of dependency on ggtern.
+#' \item convert citEntry to bibentry
+#' }
+#'
 #' @section \cocktailApp{} Version 0.2.2 (2021-04-01) :
 #' \itemize{
 #' \item merge many short ingredients.
@@ -185,7 +192,7 @@ my_ui <- function(page_title='Drink Schnauzer') {  # nocov start
 		dplyr::group_by(short_ingredient) %>%
 		dplyr::summarize(tot_am=sum(proportion,na.rm=TRUE)) %>%
 		dplyr::ungroup() %>%
-		dplyr::mutate(ingr_class=cut(tot_am,breaks=c(-1,0,10,100,1000),
+		dplyr::mutate(ingr_class=cut(tot_am,breaks=c(-1,0,10,100,Inf),
 													labels=c('garnish','uncommon-spirit','common-spirit','base-spirit'))) %>%
 		dplyr::arrange(tot_am,short_ingredient) %>%
 		dplyr::mutate(ingr_class=forcats::fct_rev(ingr_class)) %>%
@@ -468,7 +475,7 @@ applylink <- function(title,url) {
 		dplyr::filter(!is.na(proportion)) %>%
 		dplyr::mutate(rating=coalesce(rating,1)) %>%
 		dplyr::inner_join(sub_df %>%
-							 dplyr::rename(coingredient=short_ingredient,coamount=proportion),by=c('cocktail_id','rating')) %>%
+							 dplyr::rename(coingredient=short_ingredient,coamount=proportion),by=c('cocktail_id','rating'),relationship='many-to-many') %>%
 		dplyr::mutate(cova=proportion * coamount) %>%
 		dplyr::mutate(wts=rating) %>%
 		dplyr::group_by(short_ingredient,coingredient) %>%
@@ -486,8 +493,8 @@ applylink <- function(title,url) {
 		dplyr::mutate(deno=sqrt(sum_cova))
 
 	rhov <- coing %>%
-		dplyr::left_join(diagv %>% select(short_ingredient,deno),by='short_ingredient') %>%
-		dplyr::left_join(diagv %>% select(coingredient,deno) %>% rename(deno2=deno),by='coingredient') %>%
+		dplyr::left_join(diagv %>% select(short_ingredient,deno),by='short_ingredient',relationship='many-to-many') %>%
+		dplyr::left_join(diagv %>% select(coingredient,deno) %>% rename(deno2=deno),by='coingredient',relationship='many-to-many') %>%
 		dplyr::mutate(rhoval=sum_cova / (deno * deno2)) %>%
 		dplyr::filter(!is.na(rhoval)) %>% 
 		dplyr::select(short_ingredient,coingredient,ncocktails,rhoval) %>%
